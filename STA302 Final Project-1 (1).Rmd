@@ -1,0 +1,544 @@
+---
+title: "STA302H1 Final Project"
+author: "Chuyun Zhou"
+date: "6/19/2023"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Data extraction
+Read the file for CPI.
+```{r}
+cpiFile <- read.csv("./CPI.csv")
+cpiDataRaw <- cpiFile[1:41,]
+```
+
+## Create CPI data.
+```{r}
+year <- c(1981:2021)
+df <- data.frame(Year = year, CPI = cpiDataRaw$VALUE)
+
+write.csv(df, "./CPIMod.csv", row.names=FALSE)
+
+cpiData <- read.csv("./CPIMod.csv")
+```
+
+Read the file for income and extract the average income.
+```{r}
+incomeFile <- read.csv("./Income.csv")
+incomeDataRaw <- incomeFile[124:164,]
+```
+
+## Create income data.
+```{r}
+df <- data.frame(Income = incomeDataRaw$VALUE, CPI = cpiData$CPI)
+
+write.csv(df, "./IncomeMod.csv", row.names=FALSE)
+
+incomeData <- read.csv("./IncomeMod.csv")
+```
+
+Read the file for total employment number and population number.
+```{r}
+employmentFile <- read.csv("./Employment.csv", header = T)
+employmentDataRaw <- employmentFile[3937:4428,]
+populationData <- employmentFile[1:492,]
+```
+
+Calculate total employment rate for each year.
+```{r}
+employmentList <- c()
+totalEmp <- 0
+
+for (i in seq(1, 492, 12)) {
+  for (j in seq(0, 11)) {
+    totalEmp = totalEmp + employmentDataRaw[i+j, 15]
+  }
+  employmentList <- c(employmentList, totalEmp)
+  totalEmp <- 0
+}
+
+```
+
+Standardize employment rate.
+```{r}
+employmentRateList <- c()
+
+for (i in seq(1, 41)) {
+  rate = employmentList[i] / 12
+  employmentRateList <- c(employmentRateList, rate)
+}
+```
+
+## Create employment data.
+```{r}
+df <- data.frame(Employment = employmentRateList, CPI = cpiData$CPI)
+
+write.csv(df, "./EmploymentMod.csv", row.names=FALSE)
+
+employData <- read.csv("./EmploymentMod.csv")
+```
+
+Read the file for homicide number and extract the victim number.
+```{r}
+homicideFile <- read.csv("./Homicide.csv")
+
+homicideList <- c()
+
+count <- 0
+
+for (i in seq(1, 41)) {
+  for (j in seq(0, 370, 41)) {
+    count = count + homicideFile[j+i, 9]
+  }
+  homicideList <- c(homicideList, count)
+  count <- 0
+}
+```
+
+## Create homicides data.
+```{r}
+df <- data.frame(Homicide = homicideList, CPI = cpiData$CPI)
+
+write.csv(df, "./HomicideMod.csv", row.names=FALSE)
+
+homicideData <- read.csv("./HomicideMod.csv")
+```
+
+# Complete data file.
+```{r}
+df <- data.frame(Year = cpiData$Year, CPI = cpiData$CPI, Income = incomeDataRaw$VALUE, Employment = employmentRateList, Homicide = homicideList)
+
+write.csv(df, "./CompData.csv", row.names=FALSE)
+
+compData <- read.csv("./CompData.csv", header = T)
+```
+
+# Select 33 data as the tranning set randomly.
+```{r}
+set.seed(123)
+
+years <- 1981:2021
+
+random_years <- sample(years, 33)
+
+sorted_years <- sort(random_years)
+
+training_set <- compData[compData$Year %in% sorted_years, -1]
+testSet <- compData[!(compData$Year %in% sorted_years), -1]
+```
+
+
+# Plot for all the tranning set data.
+```{r}
+plot(training_set)
+```
+
+# Fit a model.
+```{r}
+mod1 = lm(training_set$CPI ~ training_set$Income + training_set$Employment + training_set$Homicide)
+plot(mod1)
+summary(mod1)
+```
+
+# Check collinearity among predictors.
+```{r}
+install.packages("car") 
+library(car) 
+vif(mod1)
+```
+
+# Take out leverage points 1 and 33.
+```{r}
+training_set2 = training_set[-c(1, 33),]
+```
+
+# Plot for all the tranning set data.
+```{r}
+plot(training_set2)
+```
+
+# Fit another model after taking out the leverage points.
+```{r}
+mod2 = lm(training_set2$CPI ~ training_set2$Income + training_set2$Employment + training_set2$Homicide)
+plot(mod2)
+summary(mod2)
+
+# R^2 decreased.
+```
+
+Take out point 30. (leverage)
+```{r}
+training_set3 <- training_set2[-c(30),]
+mod3 = lm(CPI ~ Income + Employment + Homicide,training_set3)
+plot(mod3)
+summary(mod3)
+# R^2 increased.
+```
+# Remove homicide
+```{r}
+mod4 = lm(training_set3$CPI ~ training_set3$Income + training_set3$Employment)
+plot(mod4)
+summary(mod4)
+
+# R^2 decreased.
+```
+
+Compare mod3 and mod4
+<!-- Found that AIC, AICc, BIC values are bigger in mod4.-->
+```{r}
+# Check AIC, AICc, BIC.
+# mod3
+aic_mod3 <- AIC(mod3)
+
+n <- nrow(training_set3)
+k <- length(coef(mod3))
+aicc_mod3 <- aic_mod3 + 2 * k * (k + 1) / (n - k - 1)
+
+bic_mod3 <- BIC(mod3)
+
+# mod4
+aic_mod4 <- AIC(mod4)
+aicc_mod4 <- aic_mod4 + 2 * k * (k + 1) / (n - k - 1)
+
+bic_mod4 <- BIC(mod4)
+
+# Compare
+comparison <- data.frame(
+  Model = c("Initial Model", "Model without homicide"),
+  AIC = c(aic_mod3, aic_mod4),
+  AICc = c(aicc_mod3, aicc_mod4),
+  BIC = c(bic_mod3, bic_mod4)
+)
+print(comparison)
+
+```
+
+# Check conditions for mod1.
+```{r}
+# check condition 1
+fit <- mod1$fitted.values
+plot(training_set$CPI ~ fit)
+abline(a = 0, b = 1)
+lines(lowess(training_set$CPI ~ fit), lty=2)
+
+
+# check condition 2
+d <- data.frame(Income = training_set$Income, Employment = training_set$Employment, Homicide = training_set$Homicide)
+pairs(d)
+
+par(mfrow=c(2,2))
+r <- mod1$residuals
+plot(r ~ fit, xlab="Fitted", ylab="Residuals")
+plot(r ~ training_set$Income, xlab="income", ylab="Residuals")
+plot(r ~ training_set$Employment, xlab="employment", ylab="Residuals")
+plot(r ~ training_set$Homicide, xlab="homicide", ylab="Residuals")
+qqnorm(r)
+qqline(r)
+```
+
+# Power transformation
+We need to transform as p value is smaller in transformation.
+```{r}
+library(car)
+install.packages("carData")
+library(carData)  
+
+# transforms all X and Y simultaneously
+selected_columns1 <- training_set[, c("CPI", "Income", "Employment", "Homicide")]
+
+transform <- powerTransform(cbind(selected_columns1))
+summary(transform)
+
+# if we only wanted to consider transformations on X
+selected_columns2 <- training_set[, c("Income", "Employment", "Homicide")]
+summary(powerTransform(cbind(selected_columns2)))
+```
+## Fit a new model with transfromation on all the predictors and the response
+```{r}
+# create transformed variables
+training_set$powertransformedCpi = (training_set$CPI)^0.6974
+training_set$powertransformedIncome = (training_set$Income)^-1.3364
+training_set$powertransformedEmployment = (training_set$Employment)^12.0683
+training_set$powertransformedHomicide = (training_set$Homicide)^-2.7963
+
+mod5 = lm(powertransformedCpi ~ powertransformedIncome + powertransformedEmployment + powertransformedHomicide, data = training_set)
+plot(mod5)
+summary(mod5)
+```
+
+## Fit another new model with transformation on all the predictors only
+```{r}
+training_set$powertransformedCpi2 = training_set$CPI
+training_set$powertransformedIncome2 = (training_set$Income)^3.2007
+training_set$powertransformedEmployment2 = (training_set$Employment)^11.4630
+training_set$powertransformedHomicide2 = (training_set$Homicide)^-3.0826
+
+mod6 = lm(powertransformedCpi2 ~ powertransformedIncome2 + powertransformedEmployment2 + powertransformedHomicide2, training_set)
+plot(mod6)
+summary(mod6)
+# Did not help to fix normality, R^2 decreased.
+```
+ 
+## Best subsets for mod5
+### No income
+```{r}
+mod7 = lm(powertransformedCpi ~ powertransformedEmployment + powertransformedHomicide, data = training_set)
+plot(mod7)
+summary(mod7)
+# R^2 decreased a lot.
+```
+Anova
+```{r}
+anova(mod7, mod5)
+# p-val < 0.05
+```
+
+<!-- Found that AIC, AICc, BIC values are smaller in mod5. -->
+```{r}
+# Check AIC, AICc, BIC.
+# mod7
+aic_mod7 <- AIC(mod7)
+
+n <- nrow(training_set)
+k <- length(coef(mod7))
+aicc_mod7 <- aic_mod7 + 2 * k * (k + 1) / (n - k - 1)
+
+bic_mod7 <- BIC(mod7)
+
+# mod5
+aic_mod5 <- AIC(mod5)
+
+n <- nrow(training_set)
+k <- length(coef(mod5))
+aicc_mod5 <- aic_mod5 + 2 * k * (k + 1) / (n - k - 1)
+
+bic_mod5 <- BIC(mod5)
+
+# Compare
+comparison <- data.frame(
+  Model = c("Subset model", "Initial model"),
+  AIC = c(aic_mod7, aic_mod5),
+  AICc = c(aicc_mod7, aicc_mod5),
+  BIC = c(bic_mod7, bic_mod5)
+)
+print(comparison)
+```
+
+### No employment
+```{r}
+mod8 = lm(powertransformedCpi ~ powertransformedIncome + powertransformedHomicide, data = training_set)
+summary(mod8)
+# R^2 decreased.
+```
+
+Anova
+```{r}
+anova(mod8, mod5)
+# p-val < 0.05
+```
+
+<!-- Found that AIC, AICc, BIC values are smaller in mod5. -->
+```{r}
+# Check AIC, AICc, BIC.
+# mod7
+aic_mod8 <- AIC(mod8)
+
+n <- nrow(training_set)
+k <- length(coef(mod8))
+aicc_mod8 <- aic_mod8 + 2 * k * (k + 1) / (n - k - 1)
+
+bic_mod8 <- BIC(mod8)
+
+# Compare
+comparison <- data.frame(
+  Model = c("Subset model", "Initial model"),
+  AIC = c(aic_mod8, aic_mod5),
+  AICc = c(aicc_mod8, aicc_mod5),
+  BIC = c(bic_mod8, bic_mod5)
+)
+print(comparison)
+```
+
+### No homicide
+```{r}
+mod9 = lm(powertransformedCpi ~ powertransformedIncome + powertransformedEmployment, data = training_set)
+plot(mod9)
+summary(mod9)
+# R^2 decreased.
+```
+
+Anova
+```{r}
+anova(mod9, mod5)
+# p-val < 0.05
+```
+
+<!-- Found that AIC, AICc, BIC values are smaller in mod5. -->
+```{r}
+# Check AIC, AICc, BIC.
+# mod7
+aic_mod9 <- AIC(mod9)
+
+n <- nrow(training_set)
+k <- length(coef(mod9))
+aicc_mod9 <- aic_mod9 + 2 * k * (k + 1) / (n - k - 1)
+
+bic_mod9 <- BIC(mod9)
+
+# Compare
+comparison <- data.frame(
+  Model = c("Subset model", "Initial model"),
+  AIC = c(aic_mod9, aic_mod5),
+  AICc = c(aicc_mod9, aicc_mod5),
+  BIC = c(bic_mod9, bic_mod5)
+)
+print(comparison)
+```
+
+### No income + employment
+```{r}
+mod10 = lm(powertransformedCpi ~ powertransformedHomicide, data = training_set)
+plot(mod10)
+summary(mod10)
+# No point to do ANOVA.
+```
+
+### No income + homicide
+```{r}
+mod11 = lm(powertransformedCpi ~ powertransformedEmployment, data = training_set)
+plot(mod11)
+summary(mod11)
+# No point to do ANOVA.
+```
+
+
+### No employment + homicide
+```{r}
+mod12 = lm(powertransformedCpi ~ powertransformedIncome, data = training_set)
+plot(mod12)
+summary(mod12)
+# No point to do ANOVA.
+```
+
+# mod3 conditions check and VIF
+```{r}
+# check condition 1
+fit <- mod3$fitted.values
+plot(training_set3$CPI ~ fit)
+abline(a = 0, b = 1)
+lines(lowess(training_set3$CPI ~ fit), lty=2)
+
+
+# check condition 2
+d <- data.frame(Income = training_set3$Income, Employment = training_set3$Income, Homicide = training_set3$Homicide)
+pairs(d)
+
+par(mfrow=c(2,2))
+r <- mod3$residuals
+plot(r ~ fit, xlab="Fitted", ylab="Residuals")
+plot(r ~ training_set3$Income, xlab="income", ylab="Residuals")
+plot(r ~ training_set3$Income, xlab="employment", ylab="Residuals")
+plot(r ~ training_set3$Homicide, xlab="homicide", ylab="Residuals")
+qqnorm(r)
+qqline(r)
+
+vif(mod5)
+```
+
+
+# Box-cox
+```{r}
+library(MASS)
+
+boxcox_model <- boxcox(mod5)
+lambda <- boxcox_model$x[which(boxcox_model$y==max(boxcox_model$y))]
+lambda <- round(lambda, digits = 0)
+```
+```{r}
+# Since lambda = 1, no box-cox transformation is needed.
+```
+
+# WLS
+## mod5
+try to fix heteroskedaticity.
+<!-- Check nromality of errors-->
+```{r}
+hist(mod5$residuals)
+
+qqnorm(mod5$residuals)
+qqline(mod5$residuals)
+
+boxplot(mod5$residuals)
+# Normal with mean of 0.
+```
+
+
+<!-- Check violation of constant variance -->
+```{r}
+# scatter plot of the residuals
+plot(mod5$residuals)
+abline(0,0)
+```
+
+<!-- Try to fix heteroscadacity. -->
+```{r}
+# Since the fitted value vs. residuals plot seems non-linear, and the fitted values vs standard residual seems to indicate heteroscedacity, use weighted least squares to fix it.
+
+weight = 1/(mod5$residuals^2)
+
+mod13 = lm(powertransformedCpi ~ powertransformedIncome + powertransformedEmployment + powertransformedHomicide, data = training_set, weights = weight)
+
+plot(mod13)
+summary(mod13)
+
+plot(mod13$residuals)
+abline(0,0)
+# normality is bad
+```
+
+
+```{r}
+anova(mod13, mod5)
+# mod13 has larger RSS
+# p-val > 0.05
+```
+
+<!-- Found that AIC, AICc, BIC values are bigger in mod13. -->
+```{r}
+# Check AIC, AICc, BIC.
+# mod13
+aic_mod13 <- AIC(mod13)
+
+n <- nrow(training_set2)
+k <- length(coef(mod13))
+aicc_mod13 <- aic_mod13 + 2 * k * (k + 1) / (n - k - 1)
+
+bic_mod13 <- BIC(mod13)
+
+# Compare
+comparison <- data.frame(
+  Model = c("WLS model", "Initial model"),
+  AIC = c(aic_mod13, aic_mod5),
+  AICc = c(aicc_mod13, aicc_mod5),
+  BIC = c(bic_mod13, bic_mod5)
+)
+print(comparison)
+
+```
+
+
+
+
+# Validate mod3
+```{r}
+modV = lm(CPI ~ Income + Employment + Homicide, data = testSet)
+plot(modV)
+summary(modV)
+test_predictions <- predict(mod3, newdata = testSet)
+# It can be seen that testing coefficients cover the training coefficients +/- std error
+# Validation completed
+```
