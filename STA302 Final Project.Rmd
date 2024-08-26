@@ -1,6 +1,6 @@
 ---
 title: "STA302H1 Final Project"
-author: "Chuyun Zhou"
+author: "ChuyunZ"
 date: "6/19/2023"
 output: pdf_document
 ---
